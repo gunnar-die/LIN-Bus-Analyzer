@@ -1,3 +1,8 @@
+Lin bus analyzer for sniffing Lin 1.x and 2.x messages, for the purpose of analyzing LIN messages from automotive steering wheel controls. This project utilizes an Arduino nano for development purposes, but will be ported to an STM32 for production at a later time.
+
+
+-- Wiring --
+
 //TJA1028T/5V0 Pin Name	/ TJA1028T/5V0 Pin Number / Arduino Nano pin
 
 TXD	Pin 1	- Arduino Nano D1 (TX)	
