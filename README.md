@@ -3,28 +3,24 @@ Lin bus analyzer for sniffing Lin 1.x and 2.x messages, for the purpose of analy
 
 -- Wiring --
 
-//TJA1028T/5V0 Pin Name	/ TJA1028T/5V0 Pin Number / Arduino Nano pin
+TJA1028T/5V0:
 
-TXD	Pin 1	- Arduino Nano D1 (TX)	
-//Transmit Data input from the microcontroller. The Arduino will send data to the LIN bus via this pin.
+Pin 7 (VBB) -> Car +12V
+Pin 2 (GND) -> Car GND, Arduino Nano GND
+Pin 3 (VCC) -> Arduino Nano 5V pin
+Pin 6 (LIN) -> Car LIN Bus Wire
+Pin 1 (TXD) -> Arduino Nano D0 (RX)
+Pin 4 (RXD) -> Arduino Nano D1 (TX)
+Pin 8 (INH) -> TJA1028 Pin 2 (GND)
 
-GND	Pin 2	- Arduino Nano GND, Car Chassis GND	
-//Ground connection. Crucially, connect all grounds together.
+Arduino Nano:
 
-VCC	Pin 3	- Arduino Nano 5V	
-//This is the 5V output from the TJA1028's integrated LDO. This powers your Arduino Nano (connect to its 5V pin, NOT Vin). If your Arduino is powered via USB, ensure its 5V pin isn't back-feeding the TJA1028.
+5V pin -> TJA1028 Pin 3 (VCC)
+GND pin -> TJA1028 Pin 2 (GND)
+D0 (RX) -> TJA1028 Pin 1 (TXD)
+D1 (TX) -> TJA1028 Pin 4 (RXD)
 
-RXD	Pin 4	- Arduino Nano D0 (RX)	
-//Receive Data output to the microcontroller. The Arduino will read data from the LIN bus via this pin.
+Capacitors (For Stability):
 
-IN_ (No Connect) - Pin 5 (NC)	
-//This pin is typically NC or for special features not needed for basic sniffing.
-
-LIN	Pin 6	- Car's LIN Bus Wire	
-//The single wire connection to the LIN bus in the car.
-
-VBB	Pin 7	Car's +12V (Battery)	
-//Power input for the LIN transceiver and its internal 5V LDO. Connect this to the car's 12V battery line.
-
-INH (or EN)	Pin 8	Arduino Nano GND	
-//Inhibit/Enable pin. To keep the transceiver in its normal operating mode (listening to the bus), this pin should typically be pulled LOW (connected to GND). Check datasheet for any internal pull-downs/ups.
+0.1uF ceramic capacitor across TJA1028 Pin 7 (VBB) and Pin 2 (GND).
+0.1uF ceramic capacitor across TJA1028 Pin 3 (VCC) and Pin 2 (GND).
