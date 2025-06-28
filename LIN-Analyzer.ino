@@ -59,7 +59,7 @@ bool lin_check_pid_parity(uint8_t pid) {
 }
 
 /**
- * @brief Calculates the LIN Classic Checksum (LIN 1.x / LIN 2.0 frames with data only checksum).
+ * @brief Calculates the LIN Classic Checksum (LIN 1.x).
  * This is the inverted 8-bit sum of data bytes.
  * @param data Pointer to the array of data bytes.
  * @param len Number of data bytes.
@@ -72,6 +72,23 @@ uint8_t lin_calculate_classic_checksum(const uint8_t* data, uint8_t len) {
     }
     return (uint8_t)(~sum); // Invert the sum
 }
+
+/**
+ * @brief Calculates the LIN Enhanced Checksum (LIN 2.0+).
+ * Inverted 8-bit sum of PID and data bytes.
+ * @param pid The Protected Identifier byte.
+ * @param data Pointer to the array of data bytes.
+ * @param len Number of data bytes.
+ * @return The calculated enhanced checksum.
+ */
+uint8_t lin_calculate_enhanced_checksum(uint8_t pid, const uint8_t* data, uint8_t len) {
+    uint16_t sum = pid; // Start sum with PID
+    for (uint8_t i = 0; i < len; i++) {
+        sum += data[i];
+    }
+    return (uint8_t)(~sum); // Invert the sum
+}
+
 
 /**
  * @brief Determines the expected data length for a LIN frame based on its 6-bit ID.
@@ -95,58 +112,37 @@ uint8_t getExpectedDataLength(uint8_t id) {
 }
 
 void setup() {
-    // Initialize the USB Serial for debugging output to your computer.
-    // Set a higher baud rate for faster output to the Serial Monitor.
-    Serial.begin(115200); 
-
     // Initialize the hardware serial port (D0/D1) for LIN bus communication.
     // This connects to the TJA1028's RXD/TXD pins.
-    Serial1.begin(LIN_BAUD_RATE); 
+    // NOTE: This will conflict with USB Serial if both are active simultaneously.
+    // Disconnect USB to sniff LIN, reconnect to view logs.
+    Serial.begin(LIN_BAUD_RATE); 
 
     // Print welcome message
-    Serial.println("LIN Bus Sniffer with Arduino Nano and TJA1028T/5V0");
+    // You will need to reconnect USB and set Serial Monitor to LIN_BAUD_RATE
+    // to see this message.
+    Serial.println("\n--- LIN Bus Sniffer (Arduino Nano + TJA1028) ---");
     Serial.print("Monitoring LIN bus at ");
     Serial.print(LIN_BAUD_RATE);
     Serial.println(" bps.");
     Serial.println("Waiting for LIN messages...");
-    Serial.println("(Note: Hardware Serial (D0/D1) is used for LIN. Disconnect USB to sniff, reconnect to read logs.)");
+    Serial.println("Note: D0/D1 (Hardware Serial) are used for LIN. ");
+    Serial.println("Disconnect USB to sniff, reconnect USB (and set monitor baud rate to 19200) to view logs.");
+    Serial.println("--------------------------------------------------");
 }
 
 void loop() {
-    // Check for incoming data on the LIN bus (via Serial1 connected to TJA1028).
-    while (Serial1.available()) {
-        uint8_t receivedByte = Serial1.read();
+    // Check for incoming data on the LIN bus (via Serial connected to TJA1028).
+    while (Serial.available()) {
+        uint8_t receivedByte = Serial.read();
         lastActivityTime = millis(); // Update last activity time
 
         switch (currentState) {
             case STATE_IDLE:
-                // LIN break detection is typically a long dominant (low) pulse.
-                // A common way to detect it via UART is by looking for a framing error,
-                // or a 0x00 byte if the master sends it as part of the break.
-                // A robust solution would involve measuring pulse width on the RX pin with an interrupt.
-                // For simplicity, we'll try to detect the Sync byte (0x55) after what might be a break.
-                // The TJA1028 handles the physical layer. The UART will mostly give us bytes.
-                // The presence of 0x55 immediately after an assumed break indicates a new frame.
-                // It is very difficult to detect the *break* itself purely from a UART receive buffer.
-                // We'll rely on the sequence: (Break implied) -> Sync (0x55) -> PID.
-                // Any byte that is not 0x55 while in IDLE could be noise or part of a break.
-                // We'll advance to SYNC_RECEIVED if we explicitly see 0x55.
+            case STATE_BREAK_DETECTED: // After break (or assumed break), expect Sync byte 0x55
                 if (receivedByte == 0x55) {
                     currentState = STATE_SYNC_RECEIVED;
-                    Serial.print("\n--- New LIN Frame ---\n");
-                    Serial.print("Sync (0x55) -> ");
-                }
-                break;
-
-            case STATE_BREAK_DETECTED: // This state is less directly usable without explicit break detection
-                // If we get here, it implies some break-like behavior was seen.
-                if (receivedByte == 0x55) {
-                    currentState = STATE_SYNC_RECEIVED;
-                    Serial.print("Sync (0x55) -> ");
-                } else {
-                    // Unexpected byte after potential break. Reset.
-                    Serial.println("Error: No Sync (0x55) after break-like signal. Resetting.");
-                    currentState = STATE_IDLE;
+                    Serial.print("\n[LIN Sniffer] New Frame (Sync 0x55) -> ");
                 }
                 break;
 
@@ -157,16 +153,12 @@ void loop() {
                     expectedDataLength = getExpectedDataLength(currentPID & 0x3F); // Use 6-bit ID for length
                     dataIndex = 0; // Reset data byte counter for new frame
 
-                    Serial.print("PID: 0x");
-                    Serial.print(currentPID, HEX);
-                    Serial.print(" (ID: 0x");
-                    Serial.print(currentPID & 0x3F, HEX); // Display 6-bit ID
-                    Serial.print(") -> Data (Len ");
-                    Serial.print(expectedDataLength);
+                    Serial.print("PID: 0x"); Serial.print(currentPID, HEX);
+                    Serial.print(" (ID: 0x"); Serial.print(currentPID & 0x3F, HEX);
+                    Serial.print(") -> Data (Len "); Serial.print(expectedDataLength);
                     Serial.print("): ");
                 } else {
-                    Serial.print("Error: PID 0x");
-                    Serial.print(currentPID, HEX);
+                    Serial.print("[LIN Sniffer] Error: PID 0x"); Serial.print(currentPID, HEX);
                     Serial.println(" parity check failed. Resetting.");
                     currentState = STATE_IDLE;
                 }
@@ -176,9 +168,7 @@ void loop() {
             case STATE_DATA_RECEIVED: // We are collecting data bytes
                 if (dataIndex < expectedDataLength) {
                     dataBytes[dataIndex++] = receivedByte;
-                    Serial.print("0x");
-                    Serial.print(receivedByte, HEX);
-                    Serial.print(" "); // Print data byte
+                    Serial.print("0x"); Serial.print(receivedByte, HEX); Serial.print(" ");
 
                     if (dataIndex == expectedDataLength) {
                         currentState = STATE_DATA_RECEIVED; // All data bytes collected
@@ -186,26 +176,18 @@ void loop() {
                 } else { // This means the current byte is the checksum
                     uint8_t receivedChecksum = receivedByte;
                     
-                    // The LIN 1.3/2.0 specification for checksum uses the enhanced checksum.
-                    // However, some older LIN 1.x implementations used classic checksum.
-                    // For sniffing, it's good to check both if unsure.
-                    // For steering wheel controls, usually enhanced checksum is expected for LIN 2.0.
-                    // If the original car is LIN 1.3, it expects classic checksum.
-                    // Since this sniffer is for raw LIN bus, we'll calculate classic checksum as a common check.
                     uint8_t calculatedClassicChecksum = lin_calculate_classic_checksum(dataBytes, expectedDataLength);
+                    uint8_t calculatedEnhancedChecksum = lin_calculate_enhanced_checksum(currentPID, dataBytes, expectedDataLength);
 
-                    Serial.print("-> Checksum: 0x");
-                    Serial.print(receivedChecksum, HEX);
+                    Serial.print("-> Checksum: 0x"); Serial.print(receivedChecksum, HEX);
 
-                    // You might want to also calculate enhanced checksum and print for comparison if LIN 2.0 is expected
-                    // uint8_t calculatedEnhancedChecksum = lin_calculate_enhanced_checksum(currentPID, dataBytes, expectedDataLength);
-
-                    if (receivedChecksum == calculatedClassicChecksum) {
+                    if (receivedChecksum == calculatedEnhancedChecksum) {
+                        Serial.println(" (ENHANCED CHECKSUM OK)");
+                    } else if (receivedChecksum == calculatedClassicChecksum) {
                         Serial.println(" (CLASSIC CHECKSUM OK)");
                     } else {
-                        Serial.print(" (CLASSIC CHECKSUM ERROR! Expected 0x");
-                        Serial.print(calculatedClassicChecksum, HEX);
-                        Serial.println(")");
+                        Serial.print(" (CHECKSUM FAILED! Exp Enhanced 0x"); Serial.print(calculatedEnhancedChecksum, HEX);
+                        Serial.print(", Exp Classic 0x"); Serial.print(calculatedClassicChecksum, HEX); Serial.println(")");
                     }
                     currentState = STATE_IDLE; // Frame complete, reset for next frame
                 }
@@ -220,7 +202,7 @@ void loop() {
     // Timeout mechanism: If no new byte for a while, reset state.
     // This helps in recovering from partial frames or noise.
     if (currentState != STATE_IDLE && (millis() - lastActivityTime > LIN_FRAME_TIMEOUT_MS)) {
-        Serial.println("\n--- LIN Frame Timeout / Error (Resetting State) ---");
+        Serial.println("[LIN Sniffer] Frame Timeout / Error. Resetting State.");
         currentState = STATE_IDLE;
     }
 }
